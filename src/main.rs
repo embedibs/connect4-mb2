@@ -5,6 +5,7 @@
 #![no_std]
 
 use cortex_m_rt::entry;
+use critical_section_lock_mut::LockMut;
 use embedded_graphics::{
     Drawable,
     image::{Image, ImageRaw},
@@ -16,7 +17,9 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use heapless::Vec;
 use microbit::hal::{
     Spim,
-    gpio::Level,
+    gpio::{self, Floating, Input, Level},
+    gpiote::{self, Gpiote},
+    pac::{self, interrupt},
     spim::{self, Frequency},
     timer::Timer,
 };
@@ -74,6 +77,27 @@ impl Emu {
     }
 }
 
+#[interrupt]
+fn GPIOTE() {
+    GPIOTE_PERIPHERAL.with_lock(|gpiote| {
+        if gpiote.channel0().is_event_triggered() {
+            BUTTON_A.with_lock(|btn| btn.handle_event());
+        }
+        if gpiote.channel1().is_event_triggered() {
+            BUTTON_B.with_lock(|btn| btn.handle_event());
+        }
+        gpiote.channel0().reset_events();
+        gpiote.channel1().reset_events();
+    });
+}
+
+static BUTTON_A: LockMut<Button<pac::TIMER1, fn(bool)>> = LockMut::new();
+static BUTTON_B: LockMut<Button<pac::TIMER2, fn(bool)>> = LockMut::new();
+
+static GPIOTE_PERIPHERAL: LockMut<Gpiote> = LockMut::new();
+
+static EMU: LockMut<Emu> = LockMut::new();
+
 #[entry]
 fn main() -> ! {
     rtt_init_print!();
@@ -119,27 +143,95 @@ fn main() -> ! {
 
     ////////////////////////////////////////////////////////////////////////////
 
-    let mut emu = Emu::default();
+    EMU.init(Emu::default());
 
-    emu.load_font();
-    emu.load_rom_bytes(ROM).unwrap();
-
-    let image_data = emu.display_as_rgb565();
-    let raw_image = ImageRaw::<Rgb565>::new(image_data.as_slice(), DISPLAY_WIDTH as u32);
-    let image = Image::new(&raw_image, Point::zero());
-
-    image.draw(&mut display).unwrap();
-
-    loop {
-        emu.next_frame().unwrap();
+    EMU.with_lock(|emu| {
+        emu.load_font();
+        emu.load_rom_bytes(ROM).unwrap();
 
         let image_data = emu.display_as_rgb565();
         let raw_image = ImageRaw::<Rgb565>::new(image_data.as_slice(), DISPLAY_WIDTH as u32);
-        let image = Image::new(&raw_image, Point { x: 100, y: 100 });
+        let image = Image::new(&raw_image, Point::zero());
 
         image.draw(&mut display).unwrap();
+    });
+
+    init_buttons(
+        board.TIMER1,
+        board.TIMER2,
+        board.GPIOTE,
+        board.buttons.button_a.degrade(),
+        board.buttons.button_b.degrade(),
+    );
+
+    init_nvic(board.NVIC);
+
+    loop {
+        EMU.with_lock(|emu| {
+            emu.next_frame().unwrap();
+
+            let image_data = emu.display_as_rgb565();
+            let raw_image = ImageRaw::<Rgb565>::new(image_data.as_slice(), DISPLAY_WIDTH as u32);
+            let image = Image::new(&raw_image, Point { x: 100, y: 100 });
+
+            image.draw(&mut display).unwrap();
+        });
 
         timer0.delay_ms(500);
         rprintln!("loop");
     }
+}
+
+/// Set up the NVIC to handle interrupts.
+fn init_nvic(mut nvic: pac::NVIC) {
+    unsafe {
+        // buttons (low priority).
+        pac::NVIC::unmask(pac::Interrupt::GPIOTE);
+        nvic.set_priority(pac::Interrupt::GPIOTE, 32);
+    };
+    pac::NVIC::unpend(pac::Interrupt::GPIOTE);
+}
+
+/// Set up microbit buttons.
+fn init_buttons(
+    timer1: pac::TIMER1,
+    timer2: pac::TIMER2,
+    gpiote: pac::GPIOTE,
+    button_a: gpio::Pin<Input<Floating>>,
+    button_b: gpio::Pin<Input<Floating>>,
+) {
+    let mut timer_debounce_a = Timer::new(timer1);
+    let mut timer_debounce_b = Timer::new(timer2);
+
+    let gpiote = gpiote::Gpiote::new(gpiote);
+
+    // Interrupt any activity on button A
+    let _ = gpiote
+        .channel0()
+        .input_pin(&button_a)
+        .toggle()
+        .enable_interrupt();
+
+    // Interrupt any activity on button B
+    let _ = gpiote
+        .channel1()
+        .input_pin(&button_b)
+        .toggle()
+        .enable_interrupt();
+
+    GPIOTE_PERIPHERAL.init(gpiote);
+
+    timer_debounce_a.disable_interrupt();
+    timer_debounce_a.reset_event();
+
+    BUTTON_A.init(Button::new(button_a, timer_debounce_a, |pressed| {
+        EMU.with_lock(|emu| emu.set_key(0x4, pressed));
+    }));
+
+    timer_debounce_b.disable_interrupt();
+    timer_debounce_b.reset_event();
+
+    BUTTON_B.init(Button::new(button_b, timer_debounce_b, |pressed| {
+        EMU.with_lock(|emu| emu.set_key(0x6, pressed));
+    }));
 }
