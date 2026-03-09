@@ -86,13 +86,18 @@ fn GPIOTE() {
         if gpiote.channel1().is_event_triggered() {
             BUTTON_B.with_lock(|btn| btn.handle_event());
         }
+        if gpiote.channel2().is_event_triggered() {
+            TOUCH.with_lock(|btn| btn.handle_event());
+        }
         gpiote.channel0().reset_events();
         gpiote.channel1().reset_events();
+        gpiote.channel2().reset_events();
     });
 }
 
 static BUTTON_A: LockMut<Button<pac::TIMER1, fn(bool)>> = LockMut::new();
 static BUTTON_B: LockMut<Button<pac::TIMER2, fn(bool)>> = LockMut::new();
+static TOUCH: LockMut<Button<pac::TIMER3, fn(bool)>> = LockMut::new();
 
 static GPIOTE_PERIPHERAL: LockMut<Gpiote> = LockMut::new();
 
@@ -159,12 +164,14 @@ fn main() -> ! {
     init_buttons(
         board.TIMER1,
         board.TIMER2,
+        board.TIMER3,
         board.GPIOTE,
         board.buttons.button_a.degrade(),
         board.buttons.button_b.degrade(),
+        board.pins.p1_04.into_floating_input().degrade(),
     );
 
-    init_nvic(board.NVIC);
+    init_nvic();
 
     loop {
         EMU.with_lock(|emu| {
@@ -177,18 +184,13 @@ fn main() -> ! {
             image.draw(&mut display).unwrap();
         });
 
-        timer0.delay_ms(500);
-        rprintln!("loop");
+        timer0.delay_ms(200);
     }
 }
 
 /// Set up the NVIC to handle interrupts.
-fn init_nvic(mut nvic: pac::NVIC) {
-    unsafe {
-        // buttons (low priority).
-        pac::NVIC::unmask(pac::Interrupt::GPIOTE);
-        nvic.set_priority(pac::Interrupt::GPIOTE, 32);
-    };
+fn init_nvic() {
+    unsafe { pac::NVIC::unmask(pac::Interrupt::GPIOTE) };
     pac::NVIC::unpend(pac::Interrupt::GPIOTE);
 }
 
@@ -196,12 +198,15 @@ fn init_nvic(mut nvic: pac::NVIC) {
 fn init_buttons(
     timer1: pac::TIMER1,
     timer2: pac::TIMER2,
+    timer3: pac::TIMER3,
     gpiote: pac::GPIOTE,
     button_a: gpio::Pin<Input<Floating>>,
     button_b: gpio::Pin<Input<Floating>>,
+    touch: gpio::Pin<Input<Floating>>,
 ) {
     let mut timer_debounce_a = Timer::new(timer1);
     let mut timer_debounce_b = Timer::new(timer2);
+    let mut timer_debounce_touch = Timer::new(timer3);
 
     let gpiote = gpiote::Gpiote::new(gpiote);
 
@@ -219,6 +224,13 @@ fn init_buttons(
         .toggle()
         .enable_interrupt();
 
+    // Interrupt any activity on touch button
+    let _ = gpiote
+        .channel2()
+        .input_pin(&touch)
+        .toggle()
+        .enable_interrupt();
+
     GPIOTE_PERIPHERAL.init(gpiote);
 
     timer_debounce_a.disable_interrupt();
@@ -233,5 +245,12 @@ fn init_buttons(
 
     BUTTON_B.init(Button::new(button_b, timer_debounce_b, |pressed| {
         EMU.with_lock(|emu| emu.set_key(0x6, pressed));
+    }));
+
+    timer_debounce_touch.disable_interrupt();
+    timer_debounce_touch.reset_event();
+
+    TOUCH.init(Button::new(touch, timer_debounce_touch, |pressed| {
+        EMU.with_lock(|emu| emu.set_key(0x5, pressed));
     }));
 }
