@@ -21,6 +21,10 @@ where
     I: timer::Instance,
     F: Fn(bool),
 {
+    /// # Example
+    /// ```ignore
+    /// Button::new(button, timer, |pressed| { /* do something */ })
+    /// ```
     pub fn new(button: gpio::Pin<Input<Floating>>, timer: Timer<I>, on_toggle: F) -> Self {
         Self {
             button,
@@ -29,6 +33,7 @@ where
         }
     }
 
+    /// Handle a button event.
     pub fn handle_event(&mut self) {
         if self.timer.read() == 0 {
             (self.on_toggle)(self.button.is_low().unwrap());

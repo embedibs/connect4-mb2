@@ -11,10 +11,18 @@ use embedded_graphics::{
     image::{Image, ImageRaw},
     pixelcolor::Rgb565,
     prelude::*,
+    primitives::{PrimitiveStyleBuilder, Rectangle},
 };
 use embedded_hal::delay::DelayNs;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use heapless::Vec;
+use mipidsi::{
+    models::GC9A01,
+    options::{ColorInversion, Orientation, Rotation},
+};
+use panic_rtt_target as _;
+use rtt_target::rtt_init_print;
+
 use microbit::hal::{
     Spim,
     gpio::{self, Floating, Input, Level},
@@ -23,22 +31,22 @@ use microbit::hal::{
     spim::{self, Frequency},
     timer::Timer,
 };
-use mipidsi::{
-    models::GC9A01,
-    options::{ColorInversion, Orientation, Rotation},
-};
-use panic_rtt_target as _;
-use rtt_target::{rprintln, rtt_init_print};
 
 use oxid8_core::{
     Oxid8,
-    display::{BoolVec, DISPLAY_AREA, DISPLAY_WIDTH},
+    display::{DISPLAY_AREA, DISPLAY_WIDTH},
 };
 
 mod util;
 use util::Button;
 
 const ROM: &[u8] = include_bytes!("../CONNECT4");
+
+static BUTTON_A: LockMut<Button<pac::TIMER1, fn(bool)>> = LockMut::new();
+static BUTTON_B: LockMut<Button<pac::TIMER2, fn(bool)>> = LockMut::new();
+static TOUCH: LockMut<Button<pac::TIMER3, fn(bool)>> = LockMut::new();
+static GPIOTE_PERIPHERAL: LockMut<Gpiote> = LockMut::new();
+static EMU: LockMut<Emu> = LockMut::new();
 
 #[derive(Default)]
 struct Emu(Oxid8);
@@ -61,18 +69,10 @@ impl Emu {
     // TODO: make this method better when you have a working example
     // TODO: also try to make the image bigger and more centered
     fn display_as_rgb565(&self) -> Vec<u8, { DISPLAY_AREA * 2 }> {
-        self.0
-            .display()
-            .unpack_as::<BoolVec>()
+        self.display()
             .iter()
-            .map(|&p| {
-                if p {
-                    [0b11111111, 0b11111111]
-                } else {
-                    [0b00000000, 0b00000000]
-                }
-            })
-            .flatten()
+            .by_vals()
+            .flat_map(|px| if px { [0xFF, 0xFF] } else { [0x00, 0x00] })
             .collect()
     }
 }
@@ -94,14 +94,6 @@ fn GPIOTE() {
         gpiote.channel2().reset_events();
     });
 }
-
-static BUTTON_A: LockMut<Button<pac::TIMER1, fn(bool)>> = LockMut::new();
-static BUTTON_B: LockMut<Button<pac::TIMER2, fn(bool)>> = LockMut::new();
-static TOUCH: LockMut<Button<pac::TIMER3, fn(bool)>> = LockMut::new();
-
-static GPIOTE_PERIPHERAL: LockMut<Gpiote> = LockMut::new();
-
-static EMU: LockMut<Emu> = LockMut::new();
 
 #[entry]
 fn main() -> ! {
@@ -173,7 +165,18 @@ fn main() -> ! {
 
     init_nvic();
 
+    let (white, black) = (
+        PrimitiveStyleBuilder::new()
+            .fill_color(Rgb565::WHITE)
+            .build(),
+        PrimitiveStyleBuilder::new()
+            .fill_color(Rgb565::BLACK)
+            .build(),
+    );
+
     loop {
+        /* INFO: Image Version
+
         EMU.with_lock(|emu| {
             emu.next_frame().unwrap();
 
@@ -183,8 +186,36 @@ fn main() -> ! {
 
             image.draw(&mut display).unwrap();
         });
+        */
+        EMU.with_lock(|emu| {
+            emu.next_frame().unwrap();
 
-        timer0.delay_ms(200);
+            for (i, px) in emu.display().iter().by_vals().enumerate() {
+                let scale: i32 = 4;
+                let (tx, ty): (i32, i32) = (-5, 50); // "translate"
+
+                let size = Size {
+                    width: scale as u32,
+                    height: scale as u32,
+                };
+
+                let rect = Rectangle::new(
+                    Point {
+                        x: ((i % DISPLAY_WIDTH) as i32 * scale) + tx,
+                        y: ((i / DISPLAY_WIDTH) as i32 * scale) + ty,
+                    },
+                    size,
+                );
+
+                if px {
+                    rect.into_styled(white).draw(&mut display).unwrap();
+                } else {
+                    rect.into_styled(black).draw(&mut display).unwrap();
+                }
+            }
+        });
+
+        timer0.delay_ms(16); // 60Hz
     }
 }
 
