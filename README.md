@@ -1,5 +1,8 @@
 # connect4-mb2
 
+Connect 4 running on a tft display connected to the BBC Micro:Bit v2 through a
+Chip-8 interpreter.
+
 ## Dependencies
 
 ```
