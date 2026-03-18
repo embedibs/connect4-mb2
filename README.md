@@ -25,8 +25,24 @@ cargo install --locked probe-rs-tools
 ## Build and Run
 
 ```
-cargo embed
+cargo embed --release
 ```
+
+## Notes
+
+A while ago I made a [Chip-8 interpreter][OXID8] and I wanted to try making that library no-std compatible.
+That's where this project came from. I also was messing around with some funny internal display stuff for the
+interpreter. This project was pretty simple, mostly dropping in code from other mb2 projects and reading up
+on how to use the tft-display.  
+
+I was messing around with auto trait implementations and a trait to unpack the display in the interpreter,
+but I didn't end up using them in this project. It is useful for things like WebGPU however. I ended up
+here, just iterating over the values of the display as provided by the internal `BitArray` to draw rectangles
+sized and translated to roughly center the image and large enough to play.
+
+## Video
+
+https://github.com/user-attachments/assets/c87c4ec8-c4e0-4533-aad0-ea6c89198b0f
 
 ## Acknowledgements
 
@@ -37,3 +53,4 @@ Bart Massey [mb2-tft-display](https://github.com/pdx-cs-rust-embedded/mb2-tft-di
 This project is licensed under the [MIT License][License].
 
 [License]: ./LICENSE
+[OXID8]: https://github.com/edibblepdx/Oxid-8
