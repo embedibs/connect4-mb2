@@ -28,6 +28,10 @@ cargo install --locked probe-rs-tools
 cargo embed
 ```
 
+## Acknowledgements
+
+Bart Massey [mb2-tft-display](https://github.com/pdx-cs-rust-embedded/mb2-tft-display) skeleton code
+
 ## License
 
 This project is licensed under the [MIT License][License].
