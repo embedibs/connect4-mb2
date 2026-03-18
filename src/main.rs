@@ -138,7 +138,10 @@ fn main() -> ! {
     // Call `embedded_graphics` `clear()` trait method
     <_ as embedded_graphics::draw_target::DrawTarget>::clear(&mut display, Rgb565::BLACK).unwrap();
 
-    ////////////////////////////////////////////////////////////////////////////
+    // ----------------------------------------------------
+    // new stuff below
+    // Thanks to Bart Massey for the display initialization
+    // ----------------------------------------------------
 
     EMU.init(Emu::default());
 
@@ -165,6 +168,7 @@ fn main() -> ! {
 
     init_nvic();
 
+    // Monochrome palette
     let (white, black) = (
         PrimitiveStyleBuilder::new()
             .fill_color(Rgb565::WHITE)
@@ -175,7 +179,7 @@ fn main() -> ! {
     );
 
     loop {
-        /* INFO: Image Version
+        /* INFO: Image Version (very tiny)
 
         EMU.with_lock(|emu| {
             emu.next_frame().unwrap();
@@ -187,10 +191,19 @@ fn main() -> ! {
             image.draw(&mut display).unwrap();
         });
         */
+
+        let mut data = None;
+
         EMU.with_lock(|emu| {
             emu.next_frame().unwrap();
+            // The actual display data is only 256 bytes.
+            // Cloning the display prevents drawing from blocking the
+            // interrupts that handling input.
+            data = Some(*emu.display());
+        });
 
-            for (i, px) in emu.display().iter().by_vals().enumerate() {
+        if let Some(data) = data {
+            for (i, px) in data.iter().by_vals().enumerate() {
                 let scale: i32 = 4;
                 let (tx, ty): (i32, i32) = (-5, 50); // "translate"
 
@@ -213,7 +226,7 @@ fn main() -> ! {
                     rect.into_styled(black).draw(&mut display).unwrap();
                 }
             }
-        });
+        }
 
         timer0.delay_ms(16); // 60Hz
     }

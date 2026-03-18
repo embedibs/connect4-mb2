@@ -427,7 +427,7 @@ dependencies = [
 [[package]]
 name = "oxid8-core"
 version = "0.2.0"
-source = "git+https://github.com/edibblepdx/Oxid-8?branch=feature%2Fpacked_screen#ebd3fb8a08c9894767fff47583753fd1f892476b"
+source = "git+https://github.com/edibblepdx/Oxid-8?branch=feature%2Fpacked_screen#b488ca017aa9f72003cf2ebf5a38b028456e8040"
 dependencies = [
  "bitvec",
  "cfg-if",
